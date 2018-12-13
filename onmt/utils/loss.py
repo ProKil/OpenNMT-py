@@ -39,7 +39,8 @@ def build_loss_compute(model, tgt_vocab, opt, train=True):
     elif isinstance(model.generator[1], LogSparsemax):
         criterion = SparsemaxLoss(ignore_index=padding_idx, reduction='sum')
     else:
-        criterion = nn.NLLLoss(ignore_index=padding_idx, reduction='sum')
+        # criterion = nn.NLLLoss(ignore_index=padding_idx, reduction='sum')
+        criterion = nn.NLLLoss(ignore_index=padding_idx, reduction='none')
 
     # if the loss function operates on vectors of raw logits instead of
     # probabilities, only the first part of the generator needs to be
@@ -240,15 +241,19 @@ class NMTLossCompute(LossComputeBase):
         }
 
     def _compute_loss(self, batch, output, target):
+        # FIXME put actual weights from the batch in the following tensor
+        weights = torch.ones(target.shape[1], dtype=torch.float32, device='cuda')
         bottled_output = self._bottle(output)
 
         scores = self.generator(bottled_output)
         gtruth = target.view(-1)
 
         loss = self.criterion(scores, gtruth)
-        stats = self._stats(loss.clone(), scores, gtruth)
+        reshaped_sum = loss.reshape(target.shape).sum(dim=0)
+        loss_sum = (reshaped_sum * weights).sum()
+        stats = self._stats(loss_sum.clone(), scores, gtruth)
 
-        return loss, stats
+        return loss_sum, stats
 
 
 def filter_shard_state(state, shard_size=None):
